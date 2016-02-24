@@ -11,3 +11,4 @@ Please check out the [example Jupyter notebook][3] for some use cases until a fu
 
   [1]: http://doi.org/10.1016/j.cam.2006.05.037 "Gilsing & Shardlow (2007). SDELab: A package for solving stochastic differential equations in MATLAB"
   [2]: https://en.wikipedia.org/wiki/Stochastic_differential_equation "Wikipedia: Stochastic Differential Equations"
+  [3]: https://github.com/ntezak/StochasticEuler.jl "bla"
