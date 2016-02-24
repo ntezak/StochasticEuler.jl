@@ -4,7 +4,8 @@
 
 StochasticEuler is a lightweight library for integrating real and complex valued high dimensional [stochastic differential equations][2] (supporting multi-dimensional noises). Both Ito and Stratonovich SDEs are supported. It also features some additional tools for verifying path-wise stochastic convergence.
 
-The integration method is a fixed stepsize implicit Euler-Heun (Euler-Mayurama) for a Stratonivich (Ito) SDE. These algorithms are comparable to those published under [SDELab][1]
+The integration method is a fixed stepsize implicit Euler-Heun (Euler-Mayurama) for a Stratonivich (Ito) SDE.
+These algorithms are comparable to those published under [SDELab][1].
 All relevant functions have docstrings that are accessible via the `?` prefix in the REPL or jupyter notebook.
 
 Please check out the [example Jupyter notebook][3] for some use cases until a full documentation has been written up.

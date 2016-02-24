@@ -18,7 +18,7 @@ the maximum stepsize to be used is `hmax`.
 At each time step the method solves the following non-linear system of equations
 for x(t+h):
 
-  x(t+h) == x(t) + [(1-ν) f(t, x(t)) + ν f(t+h, x(t+h))] h
+    x(t+h) == x(t) + [(1-ν) f(t, x(t)) + ν f(t+h, x(t+h))] h
 
 
 This is achieved by a damped pseudo-Newton iteration with the initial guess
@@ -38,6 +38,13 @@ function ieuler{T}(ode!, x0::Vector{T}, ts, hmax;
     hmax = float(hmax)
     nsteps = length(ts)-1
     nsteps >=1 || error("Please specify at least two different times")
+    
+    if verbose
+      status = msg -> println(msg)
+    else
+      status = msg -> nothing
+    end
+    
 
     ts = collect(Float64, ts)
 
@@ -55,7 +62,7 @@ function ieuler{T}(ode!, x0::Vector{T}, ts, hmax;
     const feps = eps(Float64)
     kkincr = round(Int, nsteps/10)
 
-    print("[ ")
+    status("[ ")
     for kk=1:nsteps
         x::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sub(xs,1:neq,kk+1)
         x[:] = sub(xs,1:neq,kk)
@@ -89,10 +96,10 @@ function ieuler{T}(ode!, x0::Vector{T}, ts, hmax;
 
         end
         if kk % kkincr == 0
-            print(". ")
+            status(". ")
         end
     end
-    print("]\n")
+    status("]\n")
     ts, xs
 end
 
@@ -117,10 +124,10 @@ real or complex normal variables `[x1,...,xD]` at a time.
 When the type parameter is `N`, it sums `N` random variables for every output
 variable such that if the underlying rng samples
 
-[x11 x12 ... x1N  \\
-  x21 x22 ... x2N  \\
-  ...   \\
-  xD1 xD2 ... XDN ]
+    [ x11 x12 ... x1N  
+      x21 x22 ... x2N  
+      ...  
+      xD1 xD2 ... XDN ]  
 
 then the `CumulativeNormal` rng sums over each row and renormalizes by `1/sqrt(N)`
 to produce a `D` dimensional vector of real/complex normal variables.
@@ -187,7 +194,9 @@ at each point in the time grid `ts`.
 The method also returns the noise increments `dWs` for each integration interval.
 The SDE is assumed to be given by
 
+\\begin{align}
   dx(t) = f(t,x(t)) dt + g(t,x(t)) dW
+\\end{align}
 
 where the type of the SDE (Ito/Stratonovich) must be specified as the the first
 function argument.
@@ -209,13 +218,15 @@ the maximum stepsize to be used is `hmax`.
 At each time step the method solves the following non-linear system of equations
 for x(t+h):
 
+\\begin{align}
   x(t+h) == x(t) + [(1-ν) f(t, x(t)) + ν f(t+h, x(t+h))] h + ΔB(x(t),ΔW(t))
+\\end{align}
 
-where the diffusion term is given by
+where the diffusion term is given by:
 
-  ΔB(x(t),ΔW) := g(t, x(t)) ΔW                         (for Ito SDEs)
-  ΔB(x(t),ΔW) := (1/2)[g(t, x(t)) + g(t, y(t))] ΔW     (for Stratonovich SDEs)
-    where y(t) := x(t) + g(t,x(t)) ΔW
+    ΔB(x(t),ΔW) := g(t, x(t)) ΔW                         (for Ito SDEs)
+    ΔB(x(t),ΔW) := (1/2)[g(t, x(t)) + g(t, y(t))] ΔW     (for Stratonovich SDEs)
+      where y(t) := x(t) + g(t,x(t)) ΔW
 
 This is achieved by a damped pseudo-Newton iteration with the initial guess
 provided by the standard forward Euler step.
@@ -228,18 +239,27 @@ Optional keyword parameters are:
   - verbose: print messages (default = true)
   - rng: An AbstractRNG instance to sample the noise increments from
   - seed: A seed for the RNG.
+  - verbose: Print status messages (default = false)
 """
 function ieuler_sde{S<:SDEType,T}(::Type{S}, sde!, x0::Vector{T}, ts, hmax, ndW;
-    κ=.8, ν=.5, ϵ_rel=1e-3, max_iter=5, rng=nothing, seed=0)
-
+    κ=.8, ν=.5, ϵ_rel=1e-3, max_iter=5, rng=nothing, seed=0, verbose=false)
+    
     if rng === nothing
         rng = MersenneTwister()
     end
-
+    if verbose
+      status = msg -> println(msg)
+    else
+      status = msg -> nothing
+    end
+    
     srand(rng, seed)
 
     hmax = float(hmax)
     ts = collect(Float64, ts)
+    0 <= ν <= 1 || error("Please specify ν ∈ [0,1].")
+    0 < κ <= 1 || error("Please specify κ ∈ (0,1].")
+
 
     nsteps = length(ts)-1
     nsteps >=1 || error("Please specify at least two different times")
@@ -264,14 +284,14 @@ function ieuler_sde{S<:SDEType,T}(::Type{S}, sde!, x0::Vector{T}, ts, hmax, ndW;
     kkincr = round(Int, nsteps/10)
 
     if S <: Stratonovich
-        println("Stratonovich mode")
+        status("Stratonovich mode")
     elseif S <: Ito
-        println("Ito mode")
+        status("Ito mode")
     else
       error("Unsupported SDE type: $S")
     end
 
-    print("[ ")
+    status("[ ")
     for kk=1:nsteps
 
         x::SubArray{T,1,Array{T,2},Tuple{UnitRange{Int64},Int64},2} = sub(xs,1:neq,kk+1)
@@ -327,10 +347,10 @@ function ieuler_sde{S<:SDEType,T}(::Type{S}, sde!, x0::Vector{T}, ts, hmax, ndW;
         end
 
         if kk % kkincr == 0
-            print(". ")
+            status(". ")
         end
     end
-    print("]\n")
+    status("]\n")
     ts, xs, dWs
 end
 
