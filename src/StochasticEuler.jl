@@ -177,6 +177,16 @@ function randn!(rng::AbstractRNG, A::Array{Complex128})
     A
 end
 
+macro addto!(v1, v2, factor)
+    # my own little devectorization macro. not sure if necessary.
+    quote
+        local jj::Int
+        @simd for jj=1:length($(esc(v1)))
+            @inbounds $(esc(v1))[jj] += $(esc(factor)) * $(esc(v2))[jj]
+        end
+    end
+end
+
 
 
 abstract SDEType
@@ -240,9 +250,11 @@ Optional keyword parameters are:
   - rng: An AbstractRNG instance to sample the noise increments from
   - seed: A seed for the RNG.
   - verbose: Print status messages (default = false)
+  - return_metrics: Whether to return integrator metrics
 """
 function ieuler_sde{S<:SDEType,T}(::Type{S}, sde!, x0::Vector{T}, ts, hmax, ndW;
-    κ=.8, ν=.5, ϵ_rel=1e-3, max_iter=5, rng=nothing, seed=0, verbose=false)
+    κ=.8, ν=.5, ϵ_rel=1e-3, max_iter=5, rng=nothing, seed=0, verbose=false,
+    return_metrics=false)
     
     if rng === nothing
         rng = MersenneTwister()
@@ -252,6 +264,8 @@ function ieuler_sde{S<:SDEType,T}(::Type{S}, sde!, x0::Vector{T}, ts, hmax, ndW;
     else
       status = msg -> nothing
     end
+    
+    
     
     srand(rng, seed)
 
@@ -264,16 +278,26 @@ function ieuler_sde{S<:SDEType,T}(::Type{S}, sde!, x0::Vector{T}, ts, hmax, ndW;
     nsteps = length(ts)-1
     nsteps >=1 || error("Please specify at least two different times")
 
-
+    iters = zeros(Int64, nsteps)
+    
     neq = size(x0, 1)
 
     xs = zeros(T, neq, nsteps + 1)
     xs[:,1] = x0
 
-    x_aux = zeros(T, neq)
+    
+    
+    x_tmp = zeros(T, neq)
+    x_tmp2 = zeros(T, neq)
+    
+    xdot_tmp = zeros(T, neq)
+    xdot_tmp2 = zeros(T, neq)
+    
     xdot0 = zeros(T, neq)
-    xdot_ν = zeros(T, neq)
-    xdot_aux_ν = zeros(T, neq)
+    x_ref_ν = zeros(T, neq)
+    
+    err = zeros(T, neq)
+    
     gdW0 = zeros(T, neq)
     gdW1 = zeros(T, neq)
 
@@ -312,34 +336,68 @@ function ieuler_sde{S<:SDEType,T}(::Type{S}, sde!, x0::Vector{T}, ts, hmax, ndW;
             end
 
             sde!(t, x, xdot0, gdW0, dW, true, true)
-            x_aux[:] = x + gdW0
-
+            
+            # x_tmp[:] = x + gdW0
+            unsafe_copy!(pointer(x_tmp), pointer(x), neq)
+            @addto! x_tmp gdW0 1
+  
 
             if S <: Stratonovich
-                sde!(ts[kk], x_aux, nothing, gdW1, dW, false, true)
-                x_aux[:] = x + (gdW1+gdW0)/2
+                sde!(t, x_tmp, nothing, gdW1, dW, false, true)
+                
+                # gdW0[:] += gdW1
+                @addto! gdW0 gdW1 1
+                
+                scale!(gdW0, .5)
             end
 
-            x_aux += xdot0*h
+            # x_tmp[:] = x + h*xdot0 + gdW0
+            unsafe_copy!(pointer(x_tmp), pointer(x), neq)
+            @addto! x_tmp xdot0 h
+            @addto! x_tmp gdW0 1
+            
+            # x_ref_ν[:] = x + (1-ν)*h*xdot0 + gdW0
+            unsafe_copy!(pointer(x_ref_ν), pointer(x), neq)
+            @addto! x_ref_ν xdot0 h*(1-ν)
+            @addto! x_ref_ν gdW0 1
+            
+            
             t += h
 
-            x[:] = x_aux
-
-
             nrm_rel = Inf64
-            fill!(xdot_ν, 0)
+            
             ii = 0
             if ν > 0
                 while nrm_rel > ϵ_rel && ii < max_iter
-
-                    sde!(t, x, xdot_aux_ν, nothing, nothing, true, false)
-                    xdot_aux_ν -= xdot0 + xdot_ν
-                    xdot_ν[:] +=  κ*xdot_aux_ν
-                    nrm_rel = norm(xdot_aux_ν)/(feps + norm(xdot_ν))
-                    x[:] = x_aux +  (h * ν) * xdot_ν
+                    sde!(t, x_tmp, xdot_tmp, nothing, nothing, true, false)
+                    
+                    # err[:] = x_tmp - ν*h*xdot_tmp - x_ref_ν
+                    unsafe_copy!(pointer(err), pointer(x_tmp), neq)
+                    @addto! err xdot_tmp -ν*h
+                    @addto! err x_ref_ν -1
+                    
+                    
+                    # x_tmp2[:] = x_tmp - h*err
+                    unsafe_copy!(pointer(x_tmp2), pointer(x_tmp), neq)
+                    @addto! x_tmp2 err -h
+                    
+                    sde!(t, x_tmp2, xdot_tmp2, nothing, nothing, true, false)
+                    
+                    # x_tmp[:] -= κ*(err + ν*(xdot_tmp-xdot_tmp2))
+                    @addto! x_tmp err -κ
+                    @addto! xdot_tmp xdot_tmp2 -1
+                    @addto! x_tmp xdot_tmp -κ*ν
+                    
+                    nrm_rel = norm(err)/(feps + norm(x_tmp))
+                    
                     ii += 1
                 end
+                iters[kk] += ii
+                
             end
+            
+            # x[:] = x_tmp
+            unsafe_copy!(pointer(x), pointer(x_tmp), neq)
 
             # allow sde! function to act on x to normalize, etc.
             sde!(t, x, nothing, nothing, nothing, false, false)
@@ -351,6 +409,9 @@ function ieuler_sde{S<:SDEType,T}(::Type{S}, sde!, x0::Vector{T}, ts, hmax, ndW;
         end
     end
     status("]\n")
+    if return_metrics
+      return ts, xs, dWs, iters
+    end
     ts, xs, dWs
 end
 
